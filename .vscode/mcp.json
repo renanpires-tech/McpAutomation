@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "gpa-backend-test-analyst": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/dist/gpa-mcp-server.js"],
+      "env": {
+        "GPA_ENVIRONMENT": "sustentacao",
+        "TARGET_COVERAGE": "100"
+      }
+    }
+  }
+}
