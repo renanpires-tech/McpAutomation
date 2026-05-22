@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { InMemoryTaskStore } from "@modelcontextprotocol/sdk/experimental/tasks/stores/in-memory.js";
 import { z } from "zod";
 import { OrchestratorAgent, formatOutput } from "./agents/OrchestratorAgent.js";
 import { MemoryAgent } from "./agents/MemoryAgent.js";
@@ -8,12 +9,20 @@ import { EventEmitter } from "events";
 // ─────────────────────────────────────────────
 //  Server Bootstrap
 // ─────────────────────────────────────────────
-const server = new McpServer({
-  name: "gpa-backend-test-analyst",
-  version: "2.0.0",
-  description:
-    "MCP Sênior especializado em análise de testes, cobertura real LCOV/JaCoCo, engenharia reversa e CI/CD para o e-commerce GPA (Grupo Pão de Açúcar).",
-});
+const taskStore = new InMemoryTaskStore();
+
+const server = new McpServer(
+  {
+    name: "gpa-backend-test-analyst",
+    version: "3.1.0",
+    description:
+      "MCP Sênior especializado em análise de testes, cobertura real LCOV/JaCoCo, engenharia reversa e CI/CD para o e-commerce GPA (Grupo Pão de Açúcar).",
+  },
+  {
+    capabilities: { tasks: {} },
+    taskStore,
+  }
+);
 
 // ─────────────────────────────────────────────
 //  TOOL 1 — analyze_test_coverage
@@ -1433,6 +1442,226 @@ server.registerTool(
 
     return { content: [{ type: "text", text: lines.join("\n") }] };
   },
+);
+
+// ─────────────────────────────────────────────
+//  Task Tools (MCP Inspector Tasks Tab)
+// ─────────────────────────────────────────────
+
+// Helper to run async work and update taskStore
+async function runTaskWork(
+  taskId: string,
+  store: typeof taskStore,
+  work: () => Promise<string>
+) {
+  try {
+    const text = await work();
+    await store.storeTaskResult(taskId, "completed", {
+      content: [{ type: "text", text }],
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await store.storeTaskResult(taskId, "failed", {
+      content: [{ type: "text", text: `❌ Erro: ${msg}` }],
+      isError: true,
+    });
+  }
+}
+
+server.experimental.tasks.registerToolTask(
+  "task_orchestrate",
+  {
+    title: "Orchestrate Multi-Agent Pipeline",
+    description:
+      "Executa o pipeline completo Multi-Agent (ANALYST → TESTER → ARCHITECT → DOC → MEMORY) " +
+      "como uma task assíncrona com polling de status.",
+    inputSchema: {
+      input: z.string().describe("Intenção ou descrição do que analisar"),
+      code_snippet: z.string().optional().describe("Código-fonte opcional"),
+    },
+    execution: { taskSupport: "optional" },
+  },
+  {
+    createTask: async ({ input, code_snippet }, extra) => {
+      const task = await extra.taskStore.createTask({ ttl: 300_000, pollInterval: 2000 });
+      runTaskWork(task.taskId, taskStore, async () => {
+        await taskStore.updateTaskStatus(task.taskId, "working", "Iniciando pipeline multi-agent...");
+        const orchestrator = new OrchestratorAgent();
+        await taskStore.updateTaskStatus(task.taskId, "working", "Executando agentes ANALYST, TESTER, ARCHITECT...");
+        const result = await orchestrator.run(input, code_snippet);
+        await taskStore.updateTaskStatus(task.taskId, "working", "Consolidando aprendizado no Knowledge Base...");
+        return formatOutput(result);
+      });
+      return { task };
+    },
+    getTask: async (_args, extra) => extra.taskStore.getTask(extra.taskId),
+    getTaskResult: async (_args, extra) => extra.taskStore.getTaskResult(extra.taskId) as Promise<import("@modelcontextprotocol/sdk/types.js").CallToolResult>,
+  }
+);
+
+server.experimental.tasks.registerToolTask(
+  "task_analyze_coverage_async",
+  {
+    title: "Analyze Test Coverage (Async)",
+    description:
+      "Análise assíncrona de cobertura de testes com progresso em tempo real. " +
+      "Identifica gaps críticos e gera sugestões de testes para domínios GPA.",
+    inputSchema: {
+      service_name: z.string().describe("Nome do serviço"),
+      coverage_report: z.string().describe("Relatório LCOV/JaCoCo"),
+      target_coverage: z.number().default(100).describe("Meta de cobertura em %"),
+    },
+    execution: { taskSupport: "optional" },
+  },
+  {
+    createTask: async ({ service_name, coverage_report, target_coverage }, extra) => {
+      const task = await extra.taskStore.createTask({ ttl: 180_000, pollInterval: 1500 });
+      runTaskWork(task.taskId, taskStore, async () => {
+        await taskStore.updateTaskStatus(task.taskId, "working", `Analisando cobertura de ${service_name}...`);
+        const orchestrator = new OrchestratorAgent();
+        await taskStore.updateTaskStatus(task.taskId, "working", "Identificando gaps e riscos de negócio...");
+        const result = await orchestrator.run(
+          `Analisa a cobertura de testes do serviço ${service_name}. Meta: ${target_coverage}%`,
+          coverage_report.substring(0, 4000)
+        );
+        return formatOutput(result);
+      });
+      return { task };
+    },
+    getTask: async (_args, extra) => extra.taskStore.getTask(extra.taskId),
+    getTaskResult: async (_args, extra) => extra.taskStore.getTaskResult(extra.taskId) as Promise<import("@modelcontextprotocol/sdk/types.js").CallToolResult>,
+  }
+);
+
+server.experimental.tasks.registerToolTask(
+  "task_reverse_engineer_async",
+  {
+    title: "Reverse Engineer Module (Async)",
+    description:
+      "Engenharia reversa assíncrona de módulo. Extrai contratos, dependências e gera documentação.",
+    inputSchema: {
+      code_snippet: z.string().describe("Código-fonte a ser analisado"),
+      language: z.enum(["java", "kotlin", "node", "python", "go"]).describe("Linguagem"),
+      context: z.string().optional().describe("Contexto adicional"),
+    },
+    execution: { taskSupport: "optional" },
+  },
+  {
+    createTask: async ({ code_snippet, language, context }, extra) => {
+      const task = await extra.taskStore.createTask({ ttl: 180_000, pollInterval: 1500 });
+      runTaskWork(task.taskId, taskStore, async () => {
+        await taskStore.updateTaskStatus(task.taskId, "working", `Iniciando engenharia reversa (${language})...`);
+        const orchestrator = new OrchestratorAgent();
+        await taskStore.updateTaskStatus(task.taskId, "working", "Mapeando contratos e dependências...");
+        const result = await orchestrator.run(
+          `Engenharia reversa em ${language}. ${context ?? ""}`,
+          code_snippet
+        );
+        return formatOutput(result);
+      });
+      return { task };
+    },
+    getTask: async (_args, extra) => extra.taskStore.getTask(extra.taskId),
+    getTaskResult: async (_args, extra) => extra.taskStore.getTaskResult(extra.taskId) as Promise<import("@modelcontextprotocol/sdk/types.js").CallToolResult>,
+  }
+);
+
+server.experimental.tasks.registerToolTask(
+  "task_generate_tests_async",
+  {
+    title: "Generate Test Suite (Async)",
+    description:
+      "Geração assíncrona de suite de testes completa com happy path, edge cases e mocks.",
+    inputSchema: {
+      code_snippet: z.string().describe("Código-fonte a ser testado"),
+      framework: z.enum(["junit5", "jest", "pytest", "testng", "spock"]).describe("Framework de testes"),
+      mock_strategy: z.enum(["mockito", "jest-mock", "wiremock", "testcontainers"]).optional().describe("Estratégia de mock"),
+    },
+    execution: { taskSupport: "optional" },
+  },
+  {
+    createTask: async ({ code_snippet, framework, mock_strategy }, extra) => {
+      const task = await extra.taskStore.createTask({ ttl: 180_000, pollInterval: 1500 });
+      runTaskWork(task.taskId, taskStore, async () => {
+        await taskStore.updateTaskStatus(task.taskId, "working", `Gerando testes ${framework}...`);
+        const orchestrator = new OrchestratorAgent();
+        await taskStore.updateTaskStatus(task.taskId, "working", "Identificando cenários e gerando casos de teste...");
+        const result = await orchestrator.run(
+          `Gera uma suite completa de testes usando ${framework}. Mock strategy: ${mock_strategy ?? "padrão"}.`,
+          code_snippet
+        );
+        return formatOutput(result);
+      });
+      return { task };
+    },
+    getTask: async (_args, extra) => extra.taskStore.getTask(extra.taskId),
+    getTaskResult: async (_args, extra) => extra.taskStore.getTaskResult(extra.taskId) as Promise<import("@modelcontextprotocol/sdk/types.js").CallToolResult>,
+  }
+);
+
+server.experimental.tasks.registerToolTask(
+  "task_diagnose_failure_async",
+  {
+    title: "Diagnose Test Failure (Async)",
+    description:
+      "Diagnóstico assíncrono de falhas em testes. Analisa stack trace e sugere correções.",
+    inputSchema: {
+      error_log: z.string().describe("Stack trace ou log de erro do teste"),
+      test_code: z.string().optional().describe("Código do teste que falhou"),
+      service_context: z.string().optional().describe("Contexto do serviço"),
+    },
+    execution: { taskSupport: "optional" },
+  },
+  {
+    createTask: async ({ error_log, test_code, service_context }, extra) => {
+      const task = await extra.taskStore.createTask({ ttl: 180_000, pollInterval: 1500 });
+      runTaskWork(task.taskId, taskStore, async () => {
+        await taskStore.updateTaskStatus(task.taskId, "working", "Analisando stack trace e contexto de falha...");
+        const orchestrator = new OrchestratorAgent();
+        await taskStore.updateTaskStatus(task.taskId, "working", "Gerando diagnóstico e plano de correção...");
+        const result = await orchestrator.run(
+          `Diagnostica a falha no teste. Contexto: ${service_context ?? "não informado"}. Erro:\n${error_log}`,
+          test_code
+        );
+        return formatOutput(result);
+      });
+      return { task };
+    },
+    getTask: async (_args, extra) => extra.taskStore.getTask(extra.taskId),
+    getTaskResult: async (_args, extra) => extra.taskStore.getTaskResult(extra.taskId) as Promise<import("@modelcontextprotocol/sdk/types.js").CallToolResult>,
+  }
+);
+
+server.experimental.tasks.registerToolTask(
+  "task_map_architecture_async",
+  {
+    title: "Map Architecture (Async)",
+    description:
+      "Mapeamento assíncrono de arquitetura: identifica SPOFs, dependências críticas e resiliência.",
+    inputSchema: {
+      code_or_config: z.string().describe("Código, configuração ou descrição do sistema"),
+      service_names: z.string().optional().describe("Lista de serviços separados por vírgula"),
+    },
+    execution: { taskSupport: "optional" },
+  },
+  {
+    createTask: async ({ code_or_config, service_names }, extra) => {
+      const task = await extra.taskStore.createTask({ ttl: 240_000, pollInterval: 2000 });
+      runTaskWork(task.taskId, taskStore, async () => {
+        await taskStore.updateTaskStatus(task.taskId, "working", "Mapeando arquitetura e dependências...");
+        const orchestrator = new OrchestratorAgent();
+        await taskStore.updateTaskStatus(task.taskId, "working", "Identificando SPOFs e avaliando resiliência...");
+        const result = await orchestrator.run(
+          `Mapeia a arquitetura do sistema. Serviços: ${service_names ?? "não especificados"}.`,
+          code_or_config
+        );
+        return formatOutput(result);
+      });
+      return { task };
+    },
+    getTask: async (_args, extra) => extra.taskStore.getTask(extra.taskId),
+    getTaskResult: async (_args, extra) => extra.taskStore.getTaskResult(extra.taskId) as Promise<import("@modelcontextprotocol/sdk/types.js").CallToolResult>,
+  }
 );
 
 // ─────────────────────────────────────────────
