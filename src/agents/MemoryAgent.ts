@@ -1,10 +1,10 @@
-import { EventEmitter } from "events";
-import { readFile, writeFile, mkdir, stat } from "fs/promises";
-import path from "path";
-import { fileURLToPath } from "url";
+import { EventEmitter } from "node:events";
+import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
   PatternEntry, SolutionEntry, ServiceMap, Metrics,
-  PatternName, Domain, Risk, Intent, KBHit,
+  PatternName, Domain, Risk, KBHit,
 } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -51,7 +51,7 @@ export function tokenize(text: string): string[] {
 // ─────────────────────────────────────────────
 
 export class MemoryAgent {
-  constructor(private emitter: EventEmitter) {}
+  constructor(private readonly emitter: EventEmitter) {}
 
   // ── Read helpers ─────────────────────────────
 
@@ -117,7 +117,7 @@ export class MemoryAgent {
       domain: entry.domain,
       risk: entry.risk,
       occurrences,
-      confidence: Math.min(0.6 + occurrences * 0.05, 1.0),
+      confidence: Math.min(0.6 + occurrences * 0.05, 1),
       recommended_tests: entry.recommended_tests ?? existing?.recommended_tests ?? [],
       last_seen: new Date().toISOString(),
       false_positives: existing?.false_positives ?? 0,
@@ -166,7 +166,7 @@ export class MemoryAgent {
     const map = await this.getServiceMap();
 
     for (const node of newNodes) {
-      if (!map.nodes.find(n => n.id === node.id)) map.nodes.push(node);
+      if (!map.nodes.some(n => n.id === node.id)) map.nodes.push(node);
     }
 
     for (const edge of newEdges) {

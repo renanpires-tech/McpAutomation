@@ -1,4 +1,4 @@
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import type { PatternDetection, PatternName, Domain, Risk } from "./types.js";
 
 // ─────────────────────────────────────────────
@@ -30,7 +30,7 @@ const PATTERNS: PatternRule[] = [
     domain: "order",
     risk: "ALTO",
     triggers: ["@KafkaListener", "ConsumerRecord", "@EventListener", "kafkaTemplate", "MessageListener"],
-    baseConfidence: 0.80,
+    baseConfidence: 0.8,
     testerMessage: "precisa de 4 testes: evento válido, DLQ em exceção, idempotência, falha de deserialização",
     architectMessage: "nova dependência de mensageria encontrada — verificar consumer group + retry config",
   },
@@ -59,7 +59,7 @@ const PATTERNS: PatternRule[] = [
 // ─────────────────────────────────────────────
 
 export class AnalystAgent {
-  constructor(private emitter: EventEmitter) {}
+  constructor(private readonly emitter: EventEmitter) {}
 
   analyze(code: string): PatternDetection[] {
     const detections: PatternDetection[] = [];
@@ -72,7 +72,7 @@ export class AnalystAgent {
       if (found.length === 0) continue;
 
       // Confidence boosted by number of matching triggers
-      const confidence = Math.min(rule.baseConfidence + found.length * 0.03, 1.0);
+      const confidence = Math.min(rule.baseConfidence + found.length * 0.03, 1);
       const signature = `${rule.name}::${rule.domain}`;
 
       const detection: PatternDetection = {
@@ -130,10 +130,12 @@ export class AnalystAgent {
     const primary = detections[0];
     const lines: string[] = [];
 
-    lines.push(`**Padrão identificado:** \`${primary.pattern}\``);
-    lines.push(`**Domínio GPA:** ${primary.domain} | **Risco:** ${primary.risk}`);
-    lines.push(`**Triggers encontrados:** ${primary.triggers.join(", ") || "análise genérica"}`);
-    lines.push(`**Confidence:** ${(primary.confidence * 100).toFixed(0)}%`);
+    lines.push(
+      `**Padrão identificado:** \`${primary.pattern}\``,
+      `**Domínio GPA:** ${primary.domain} | **Risco:** ${primary.risk}`,
+      `**Triggers encontrados:** ${primary.triggers.join(", ") || "análise genérica"}`,
+      `**Confidence:** ${(primary.confidence * 100).toFixed(0)}%`,
+    );
 
     if (primary.risk === "CRÍTICO") {
       lines.push(`\n⚠️ **ATENÇÃO:** Componente de domínio crítico — cobertura de 100% obrigatória.`);
@@ -152,7 +154,8 @@ export class AnalystAgent {
     }
 
     if (smells.length > 0) {
-      lines.push(`\n**Code Smells detectados:**\n${smells.map(s => `- ${s}`).join("\n")}`);
+      const smellList = smells.map(s => `- ${s}`).join("\n");
+      lines.push(`\n**Code Smells detectados:**\n${smellList}`);
     }
 
     return lines.join("\n");

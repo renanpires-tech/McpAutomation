@@ -1,4 +1,4 @@
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import type { PatternDetection, PatternName } from "./types.js";
 
 // ─────────────────────────────────────────────
@@ -282,7 +282,7 @@ class ${cls}Test {
 // ─────────────────────────────────────────────
 
 export class TesterAgent {
-  constructor(private emitter: EventEmitter) {}
+  constructor(private readonly emitter: EventEmitter) {}
 
   generateTests(detections: PatternDetection[], className: string, refinementFeedback: string[]): string {
     if (detections.length === 0) return "";
@@ -301,7 +301,7 @@ export class TesterAgent {
   }
 
   extractClassName(code: string): string {
-    const match = code.match(/(?:class|interface|enum)\s+(\w+)/);
+    const match = /(?:class|interface|enum)\s+(\w+)/.exec(code);
     return match?.[1] ?? "UnknownClass";
   }
 }

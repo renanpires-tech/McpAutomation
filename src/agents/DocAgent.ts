@@ -1,4 +1,4 @@
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import type { PatternDetection, Domain, Risk } from "./types.js";
 
 // ─────────────────────────────────────────────
@@ -6,7 +6,7 @@ import type { PatternDetection, Domain, Risk } from "./types.js";
 // ─────────────────────────────────────────────
 
 export class DocAgent {
-  constructor(private emitter: EventEmitter) {}
+  constructor(private readonly emitter: EventEmitter) {}
 
   generateDoc(code: string, detections: PatternDetection[], existingDoc?: string): string {
     const primary = detections[0];
@@ -135,7 +135,7 @@ ${methodDocs ? methodDocs + "\n *\n" : " *\n"}${depDocs ? depDocs + "\n" : ""}${
   }
 
   private extractClassName(code: string): string {
-    const match = code.match(/(?:class|interface|enum)\s+(\w+)/);
+    const match = /(?:class|interface|enum)\s+(\w+)/.exec(code);
     return match?.[1] ?? "UnknownClass";
   }
 
@@ -147,7 +147,7 @@ ${methodDocs ? methodDocs + "\n *\n" : " *\n"}${depDocs ? depDocs + "\n" : ""}${
   private extractDependencies(code: string): string[] {
     const deps: string[] = [];
     if (code.includes("@FeignClient")) {
-      const match = code.match(/@FeignClient\s*\(\s*(?:name\s*=\s*)?["']([^"']+)["']/);
+      const match = /@FeignClient\s*\(\s*(?:name\s*=\s*)?["']([^"']+)["']/.exec(code);
       if (match) deps.push(match[1]);
     }
     if (code.includes("RestTemplate")) deps.push("RestTemplate (HTTP externo)");

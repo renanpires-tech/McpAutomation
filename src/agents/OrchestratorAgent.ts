@@ -1,11 +1,11 @@
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import { MemoryAgent } from "./MemoryAgent.js";
 import { AnalystAgent } from "./AnalystAgent.js";
 import { TesterAgent } from "./TesterAgent.js";
 import { ArchitectAgent } from "./ArchitectAgent.js";
 import { DocAgent } from "./DocAgent.js";
 import type {
-  Intent, Domain, Risk, PatternName,
+  Intent, Domain, Risk,
   OrchestrationResult, KBHit, PatternDetection,
 } from "./types.js";
 
@@ -46,12 +46,12 @@ const TEAM_MAP: Record<Intent, string[]> = {
 // ─────────────────────────────────────────────
 
 export class OrchestratorAgent {
-  private emitter: EventEmitter;
-  private memory: MemoryAgent;
-  private analyst: AnalystAgent;
-  private tester: TesterAgent;
-  private architect: ArchitectAgent;
-  private doc: DocAgent;
+  private readonly emitter: EventEmitter;
+  private readonly memory: MemoryAgent;
+  private readonly analyst: AnalystAgent;
+  private readonly tester: TesterAgent;
+  private readonly architect: ArchitectAgent;
+  private readonly doc: DocAgent;
 
   constructor() {
     this.emitter = new EventEmitter();
@@ -171,34 +171,44 @@ export class OrchestratorAgent {
       lines.push(`📖 **Solução baseada em ${kbHit.solution.reused_count + 1} uso(s) anteriores do KB** (score ${(kbHit.score * 100).toFixed(0)}%)\n`);
     }
 
-    lines.push(`### Padrão \`${primary.pattern}\` — Domínio: ${primary.domain}`);
-    lines.push(`**Risco:** ${primary.risk}\n`);
+    lines.push(
+      `### Padrão \`${primary.pattern}\` — Domínio: ${primary.domain}`,
+      `**Risco:** ${primary.risk}\n`,
+    );
 
     if (primary.pattern === "webhook_handler") {
-      lines.push("**Checklist de implementação:**");
-      lines.push("- [ ] Validar assinatura HMAC/RSA antes de qualquer processamento");
-      lines.push("- [ ] Implementar idempotência via `idempotency_key` no banco");
-      lines.push("- [ ] Retornar `200 OK` imediatamente, processar em background");
-      lines.push("- [ ] Audit log obrigatório para cada webhook recebido");
-      lines.push("- [ ] Configurar `timeout: 30s` no handler");
+      lines.push(
+        "**Checklist de implementação:**",
+        "- [ ] Validar assinatura HMAC/RSA antes de qualquer processamento",
+        "- [ ] Implementar idempotência via `idempotency_key` no banco",
+        "- [ ] Retornar `200 OK` imediatamente, processar em background",
+        "- [ ] Audit log obrigatório para cada webhook recebido",
+        "- [ ] Configurar `timeout: 30s` no handler",
+      );
     } else if (primary.pattern === "kafka_consumer") {
-      lines.push("**Checklist de implementação:**");
-      lines.push("- [ ] Configurar `@RetryableTopic` com backoff exponencial");
-      lines.push("- [ ] Implementar DLQ (Dead Letter Queue) com alertas");
-      lines.push("- [ ] Garantir idempotência: verificar `eventId` processado antes de agir");
-      lines.push("- [ ] Nunca propagar exceção no método `@KafkaListener` sem DLQ configurado");
+      lines.push(
+        "**Checklist de implementação:**",
+        "- [ ] Configurar `@RetryableTopic` com backoff exponencial",
+        "- [ ] Implementar DLQ (Dead Letter Queue) com alertas",
+        "- [ ] Garantir idempotência: verificar `eventId` processado antes de agir",
+        "- [ ] Nunca propagar excessão no método `@KafkaListener` sem DLQ configurado",
+      );
     } else if (primary.pattern === "transactional_service") {
-      lines.push("**Checklist de implementação:**");
-      lines.push("- [ ] `@Transactional(rollbackFor = Exception.class)` — incluir checked exceptions");
-      lines.push("- [ ] Não capturar exceptions dentro do método transacional sem relançar");
-      lines.push("- [ ] Audit log fora da transação (não vai junto no rollback)");
-      lines.push("- [ ] Eventos de domínio publicados APÓS commit");
+      lines.push(
+        "**Checklist de implementação:**",
+        "- [ ] `@Transactional(rollbackFor = Exception.class)` — incluir checked exceptions",
+        "- [ ] Não capturar exceptions dentro do método transacional sem relaçar",
+        "- [ ] Audit log fora da transação (não vai junto no rollback)",
+        "- [ ] Eventos de domínio publicados APÓS commit",
+      );
     } else if (primary.pattern === "feign_client") {
-      lines.push("**Checklist de implementação:**");
-      lines.push("- [ ] Configurar `connectTimeout` e `readTimeout` no `FeignClient`");
-      lines.push("- [ ] Implementar `@CircuitBreaker` com Resilience4j");
-      lines.push("- [ ] Fallback method para serviço indisponível");
-      lines.push("- [ ] Retry apenas para erros 5xx, nunca para 4xx");
+      lines.push(
+        "**Checklist de implementação:**",
+        "- [ ] Configurar `connectTimeout` e `readTimeout` no `FeignClient`",
+        "- [ ] Implementar `@CircuitBreaker` com Resilience4j",
+        "- [ ] Fallback method para serviço indisponível",
+        "- [ ] Retry apenas para erros 5xx, nunca para 4xx",
+      );
     }
 
     if (archNotes.length > 0) {
@@ -213,23 +223,29 @@ export class OrchestratorAgent {
     const cmds: string[] = [];
 
     if (intent === "test_generation" || intent === "coverage_analysis") {
-      cmds.push("```bash");
-      cmds.push("# Executar testes e verificar cobertura JaCoCo");
-      cmds.push("mvn test jacoco:report");
-      cmds.push("# Verificar relatório em: target/site/jacoco/index.html");
-      cmds.push("# Meta: 100% cobertura para domínio " + primary.domain);
-      cmds.push("```");
+      cmds.push(
+        "```bash",
+        "# Executar testes e verificar cobertura JaCoCo",
+        "mvn test jacoco:report",
+        "# Verificar relatório em: target/site/jacoco/index.html",
+        "# Meta: 100% cobertura para domínio " + primary.domain,
+        "```",
+      );
     } else if (intent === "failure_diagnosis") {
-      cmds.push("```bash");
-      cmds.push("# Reproduzir falha em isolamento");
-      cmds.push(`mvn test -Dtest=${this.tester.extractClassName("") + "Test"} -pl . -am`);
-      cmds.push("# Verificar logs: grep 'ERROR\\|WARN' target/surefire-reports/*.txt");
-      cmds.push("```");
+      cmds.push(
+        "```bash",
+        "# Reproduzir falha em isolamento",
+        `mvn test -Dtest=${this.tester.extractClassName("") + "Test"} -pl . -am`,
+        String.raw`# Verificar logs: grep 'ERROR\|WARN' target/surefire-reports/*.txt`,
+        "```",
+      );
     } else {
-      cmds.push("```bash");
-      cmds.push("# Compilar e verificar");
-      cmds.push("mvn compile -q && echo '✅ Compilação OK'");
-      cmds.push("```");
+      cmds.push(
+        "```bash",
+        "# Compilar e verificar",
+        "mvn compile -q && echo '✅ Compilação OK'",
+        "```",
+      );
     }
 
     return cmds.join("\n");
@@ -247,7 +263,7 @@ export class OrchestratorAgent {
     if (validation.approved) score += 0.15;
     if (tests.length > 500) score += 0.05;
 
-    return Math.min(score, 1.0);
+    return Math.min(score, 1);
   }
 }
 

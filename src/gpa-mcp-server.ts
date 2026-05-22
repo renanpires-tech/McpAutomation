@@ -4,7 +4,7 @@ import { InMemoryTaskStore } from "@modelcontextprotocol/sdk/experimental/tasks/
 import { z } from "zod";
 import { OrchestratorAgent, formatOutput } from "./agents/OrchestratorAgent.js";
 import { MemoryAgent } from "./agents/MemoryAgent.js";
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 
 // ─────────────────────────────────────────────
 //  Server Bootstrap
@@ -49,7 +49,10 @@ server.registerTool(
   async ({ service_name, coverage_report, target_coverage }) => {
     const isJaCoCo = coverage_report.includes("<report") || coverage_report.includes("<package") || coverage_report.includes("<class");
     const isLCOV = coverage_report.startsWith("SF:") || coverage_report.includes("\nSF:") || coverage_report.includes("DA:");
-    const format = isJaCoCo ? "JaCoCo (XML)" : isLCOV ? "LCOV" : "desconhecido — interprete com melhor esforço";
+    let format: string;
+    if (isJaCoCo) format = "JaCoCo (XML)";
+    else if (isLCOV) format = "LCOV";
+    else format = "desconhecido — interprete com melhor esforço";
 
     const gpaBusinessContext = `
 ## BASE DE CONHECIMENTO GPA — Criticidade por Domínio
@@ -65,26 +68,29 @@ Regras de negócio críticas:
 - order: transição de estado idempotente, cancelamento com prazo configurável, notificação por transição
 - fraud: score de risco, aprovação automática < threshold, revisão manual ≥ threshold`;
 
-    const parseInstructions = isJaCoCo
-      ? `## INSTRUÇÕES DE PARSE — JaCoCo XML
+    let parseInstructions: string;
+    if (isJaCoCo) {
+      parseInstructions = `## INSTRUÇÕES DE PARSE — JaCoCo XML
 Para cada <package> e <class>:
 1. Extraia nome do pacote/classe do atributo name
 2. Para <counter type="LINE">: missed e covered → line_coverage = covered/(missed+covered)*100
 3. Para <counter type="BRANCH">: missed e covered → branch_coverage = covered/(missed+covered)*100
 4. Para <counter type="METHOD">: missed e covered → method_coverage
 5. Para linhas não cobertas: <line nr="X" mi="1"> ou <line nr="X" bi="1"> (mi=missed instruction, bi=missed branch)
-6. Identifique o número de linha exato e o tipo do gap (LINE | BRANCH | METHOD)`
-      : isLCOV
-      ? `## INSTRUÇÕES DE PARSE — LCOV
+6. Identifique o número de linha exato e o tipo do gap (LINE | BRANCH | METHOD)`;
+    } else if (isLCOV) {
+      parseInstructions = `## INSTRUÇÕES DE PARSE — LCOV
 Para cada bloco SF (source file):
 1. SF:path → nome do arquivo
 2. FN:line,name → funções declaradas
 3. FNDA:hits,name → hits por função (hits=0 → não coberta)
 4. DA:line,hits → cobertura de linha (hits=0 → não coberta → gap de linha)
 5. BRDA:line,block,branch,hits → cobertura de branch (hits=0 → gap de branch)
-6. FNH/FNF → funções cobertas/total | LH/LF → linhas cobertas/total | BRH/BRF → branches cobertas/total`
-      : `## INSTRUÇÕES DE PARSE
+6. FNH/FNF → funções cobertas/total | LH/LF → linhas cobertas/total | BRH/BRF → branches cobertas/total`;
+    } else {
+      parseInstructions = `## INSTRUÇÕES DE PARSE
 Formato não identificado — analise o relatório com melhor esforço e extraia cobertura por arquivo/classe.`;
+    }
 
     const prompt = `Você é um Engenheiro Sênior de Qualidade com 8+ anos em e-commerce de alta escala.
 Atue como par técnico sênior na sustentação do e-commerce GPA.
@@ -171,7 +177,12 @@ server.registerTool(
   },
   async ({ code_snippet, language, context }) => {
     const docFormat = language === "java" || language === "kotlin" ? "Javadoc" : "JSDoc/docstring";
-    const testFramework = language === "java" ? "JUnit 5 + Mockito" : language === "kotlin" ? "JUnit 5 + MockK" : language === "node" ? "Jest" : language === "python" ? "pytest" : "framework padrão";
+    let testFramework: string;
+    if (language === "java") testFramework = "JUnit 5 + Mockito";
+    else if (language === "kotlin") testFramework = "JUnit 5 + MockK";
+    else if (language === "node") testFramework = "Jest";
+    else if (language === "python") testFramework = "pytest";
+    else testFramework = "framework padrão";
 
     const prompt = `Você é um Engenheiro Sênior de Backend com 8+ anos em arquiteturas distribuídas no e-commerce GPA.
 Atue como par técnico sênior: analise cirurgicamente o código abaixo.
@@ -688,8 +699,8 @@ server.registerTool(
                   break
           ")
           echo "Cobertura atual: \${COVERAGE}%"
-          echo "COVERAGE=\${COVERAGE}" >> \$GITHUB_ENV
-          if (( \$(echo "\${COVERAGE} < ${target_coverage}" | bc -l) )); then
+          echo "COVERAGE=\${COVERAGE}" >> $GITHUB_ENV
+          if (( $(echo "\${COVERAGE} < ${target_coverage}" | bc -l) )); then
             echo "❌ Cobertura \${COVERAGE}% abaixo da meta de ${target_coverage}%"
             exit 1
           fi
@@ -714,8 +725,8 @@ server.registerTool(
                   break
           ")
           echo "Cobertura atual: \${COVERAGE}%"
-          echo "COVERAGE=\${COVERAGE}" >> \$GITHUB_ENV
-          if (( \$(echo "\${COVERAGE} < ${target_coverage}" | bc -l) )); then
+          echo "COVERAGE=\${COVERAGE}" >> $GITHUB_ENV
+          if (( $(echo "\${COVERAGE} < ${target_coverage}" | bc -l) )); then
             echo "❌ Cobertura \${COVERAGE}% abaixo da meta de ${target_coverage}%"
             exit 1
           fi
@@ -1353,14 +1364,16 @@ server.registerTool(
 
     for (let i = 0; i < hits.length; i++) {
       const { key, solution, score } = hits[i];
-      lines.push(`### ${i + 1}. \`${key}\``);
-      lines.push(`- **Intenção:** ${solution.intent}`);
-      lines.push(`- **Domínio:** ${solution.domain}`);
-      lines.push(`- **Score de similaridade:** ${(score * 100).toFixed(0)}%`);
-      lines.push(`- **Quality score:** ${(solution.quality_score * 100).toFixed(0)}%`);
-      lines.push(`- **Reutilizado:** ${solution.reused_count}x`);
-      lines.push(`- **Agentes usados:** ${solution.agents_used.join(", ")}`);
-      lines.push(`- **Resumo:** ${solution.solution_summary}\n`);
+      lines.push(
+        `### ${i + 1}. \`${key}\``,
+        `- **Intenção:** ${solution.intent}`,
+        `- **Domínio:** ${solution.domain}`,
+        `- **Score de similaridade:** ${(score * 100).toFixed(0)}%`,
+        `- **Quality score:** ${(solution.quality_score * 100).toFixed(0)}%`,
+        `- **Reutilizado:** ${solution.reused_count}x`,
+        `- **Agentes usados:** ${solution.agents_used.join(", ")}`,
+        `- **Resumo:** ${solution.solution_summary}\n`,
+      );
     }
 
     const patternList = Object.entries(patterns)
@@ -1396,7 +1409,11 @@ server.registerTool(
     const map = await memory.getServiceMap();
 
     const trendBar = metrics.quality_trend
-      .map(q => q >= 0.9 ? "🟢" : q >= 0.7 ? "🟡" : "🔴")
+      .map(q => {
+        if (q >= 0.9) { return "🟢"; }
+        if (q >= 0.7) { return "🟡"; }
+        return "🔴";
+      })
       .join(" ");
 
     const lines: string[] = [
