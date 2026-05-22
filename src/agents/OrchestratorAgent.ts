@@ -4,6 +4,7 @@ import { AnalystAgent } from "./AnalystAgent.js";
 import { TesterAgent } from "./TesterAgent.js";
 import { ArchitectAgent } from "./ArchitectAgent.js";
 import { DocAgent } from "./DocAgent.js";
+import type { KnowledgeBase } from "../memory/KnowledgeBase.js";
 import type {
   Intent, Domain, Risk,
   OrchestrationResult, KBHit, PatternDetection,
@@ -53,13 +54,21 @@ export class OrchestratorAgent {
   private readonly architect: ArchitectAgent;
   private readonly doc: DocAgent;
 
-  constructor() {
-    this.emitter = new EventEmitter();
+  constructor(private readonly kb?: KnowledgeBase) {
+    this.emitter   = new EventEmitter();
     this.memory    = new MemoryAgent(this.emitter);
     this.analyst   = new AnalystAgent(this.emitter);
     this.tester    = new TesterAgent(this.emitter);
     this.architect = new ArchitectAgent(this.emitter);
     this.doc       = new DocAgent(this.emitter);
+  }
+
+  /** process() — convenience wrapper used by TaskExecutor */
+  async process(input: string, code?: string): Promise<{ content: string; qualityScore: number }> {
+    const result = await this.run(input, code);
+    const content = formatOutput(result);
+    if (this.kb) await this.kb.recordQualityScore(result.quality_score);
+    return { content, qualityScore: result.quality_score };
   }
 
   async run(input: string, code?: string): Promise<OrchestrationResult> {

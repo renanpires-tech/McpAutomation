@@ -5,18 +5,29 @@ import { z } from "zod";
 import { OrchestratorAgent, formatOutput } from "./agents/OrchestratorAgent.js";
 import { MemoryAgent } from "./agents/MemoryAgent.js";
 import { EventEmitter } from "node:events";
+import { KnowledgeBase } from "./memory/KnowledgeBase.js";
+import { TaskExecutor } from "./tasks/task-executor.js";
+import { TaskRegistry } from "./tasks/task-registry.js";
+import { JaCoCoParser } from "./parsers/JaCoCoParser.js";
+import { StackTraceParser } from "./parsers/StackTraceParser.js";
 
 // ─────────────────────────────────────────────
 //  Server Bootstrap
 // ─────────────────────────────────────────────
 const taskStore = new InMemoryTaskStore();
 
+// v4.0 — KnowledgeBase + Orchestrator + TaskExecutor
+const kb = new KnowledgeBase();
+await kb.init();
+const orchestrator = new OrchestratorAgent(kb);
+const taskExecutor = new TaskExecutor(orchestrator, kb);
+
 const server = new McpServer(
   {
     name: "gpa-backend-test-analyst",
-    version: "3.1.0",
+    version: "4.0.0",
     description:
-      "MCP Sênior especializado em análise de testes, cobertura real LCOV/JaCoCo, engenharia reversa e CI/CD para o e-commerce GPA (Grupo Pão de Açúcar).",
+      "MCP Sênior v4.0 — domain-driven, parsers reais JaCoCo/LCOV, geradores JUnit5/Mockito/Javadoc, KnowledgeBase persistente — sustentação do e-commerce GPA.",
   },
   {
     capabilities: { tasks: {} },
@@ -1678,6 +1689,76 @@ server.experimental.tasks.registerToolTask(
     },
     getTask: async (_args, extra) => extra.taskStore.getTask(extra.taskId),
     getTaskResult: async (_args, extra) => extra.taskStore.getTaskResult(extra.taskId) as Promise<import("@modelcontextprotocol/sdk/types.js").CallToolResult>,
+  }
+);
+
+// ─────────────────────────────────────────────
+//  v4.0 TOOL — analyze (real parser pipeline)
+// ─────────────────────────────────────────────
+server.registerTool(
+  "analyze",
+  {
+    description: "v4.0 — Pipeline real: analisa código, detecta padrões GPA, gera diagnóstico e testes compiláveis via OrchestratorAgent.",
+    inputSchema: {
+      input:  z.string().describe("Pergunta ou descrição do problema"),
+      code:   z.string().optional().describe("Código-fonte Java/Kotlin a analisar"),
+    },
+  },
+  async ({ input, code }) => {
+    const result = await orchestrator.process(input, code);
+    return { content: [{ type: "text", text: result.content }] };
+  }
+);
+
+// ─────────────────────────────────────────────
+//  v4.0 TOOL — show_knowledge
+// ─────────────────────────────────────────────
+server.registerTool(
+  "show_knowledge",
+  {
+    description: "v4.0 — Exibe métricas e dados armazenados na KnowledgeBase (padrões, soluções, métricas de qualidade).",
+    inputSchema: {
+      category: z.enum(["patterns", "solutions", "metrics", "services"]).optional().describe("Categoria a visualizar"),
+    },
+  },
+  async ({ category }) => {
+    const cat = category ?? "metrics";
+    const data = await kb.dump(cat as Parameters<typeof kb.dump>[0]);
+    return { content: [{ type: "text", text: `## KnowledgeBase — ${cat}\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`` }] };
+  }
+);
+
+// ─────────────────────────────────────────────
+//  v4.0 TOOL — task (TaskExecutor dispatch)
+// ─────────────────────────────────────────────
+server.registerTool(
+  "run_task",
+  {
+    description: "v4.0 — Executa task específica: analyze_coverage, generate_tests, diagnose_failure, generate_docs, full_analysis.",
+    inputSchema: {
+      task_id:  z.enum(["analyze_coverage", "generate_tests", "diagnose_failure", "generate_docs", "full_analysis"]).describe("ID da task"),
+      input:    z.record(z.unknown()).describe("Parâmetros da task conforme task-definitions"),
+    },
+  },
+  async ({ task_id, input }) => {
+    const result = await taskExecutor.execute({ id: task_id, input: input as Record<string, unknown> });
+    return { content: [{ type: "text", text: result.content }] };
+  }
+);
+
+// ─────────────────────────────────────────────
+//  v4.0 TOOL — list_tasks
+// ─────────────────────────────────────────────
+server.registerTool(
+  "list_tasks",
+  {
+    description: "v4.0 — Lista todas as tasks disponíveis com descrição e schema de input.",
+    inputSchema: {},
+  },
+  async () => {
+    const registry = TaskRegistry.list();
+    const lines = registry.tasks.map(t => `### ${t.id}\n${t.description}`);
+    return { content: [{ type: "text", text: `## Tasks disponíveis (v4.0)\n\n${lines.join("\n\n")}` }] };
   }
 );
 
