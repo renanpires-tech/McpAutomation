@@ -1,6 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { OrchestratorAgent, formatOutput } from "./agents/OrchestratorAgent.js";
+import { MemoryAgent } from "./agents/MemoryAgent.js";
+import { EventEmitter } from "events";
 
 // ─────────────────────────────────────────────
 //  Server Bootstrap
@@ -1277,6 +1280,159 @@ server.registerTool(
       }],
     };
   }
+);
+
+// ─────────────────────────────────────────────
+//  Multi-Agent Tools
+// ─────────────────────────────────────────────
+
+server.registerTool(
+  "multi_agent_analyze",
+  {
+    description:
+      "Pipeline completo Multi-Agent com Auto-Aprendizado. " +
+      "Orquestra ANALYST → TESTER → ARCHITECT → DOC → MEMORY em tempo real. " +
+      "Detecta padrões GPA (webhook, kafka, transactional, feign), gera testes prontos, " +
+      "documentação Javadoc e persiste aprendizado no Knowledge Base.",
+    inputSchema: {
+      input: z.string().describe("Descrição do que analisar ou a intenção (ex: 'analisa esse webhook handler')"),
+      code_snippet: z.string().optional().describe("Código-fonte a ser analisado (Java/Kotlin/etc)"),
+    },
+  },
+  async ({ input, code_snippet }) => {
+    const orchestrator = new OrchestratorAgent();
+    const result = await orchestrator.run(input, code_snippet);
+    const output = formatOutput(result);
+    return { content: [{ type: "text", text: output }] };
+  },
+);
+
+server.registerTool(
+  "query_knowledge_base",
+  {
+    description:
+      "Consulta o Knowledge Base acumulado do sistema Multi-Agent. " +
+      "Busca soluções similares usando matching fuzzy por keywords. " +
+      "Retorna as top-3 soluções com confidence e reuse count.",
+    inputSchema: {
+      query: z.string().describe("O que você quer buscar no KB (ex: 'webhook handler payment idempotência')"),
+      top_n: z.number().int().min(1).max(10).default(3).describe("Número de resultados a retornar"),
+    },
+  },
+  async ({ query, top_n }) => {
+    const emitter = new EventEmitter();
+    const memory = new MemoryAgent(emitter);
+    const hits = await memory.findSimilarSolutions(query, top_n);
+    const patterns = await memory.getPatterns();
+
+    if (hits.length === 0) {
+      return {
+        content: [{
+          type: "text",
+          text: `🔍 **Knowledge Base — Query:** \`${query}\`\n\n` +
+            `Nenhuma solução similar encontrada ainda.\n` +
+            `O KB cresce a cada execução de \`multi_agent_analyze\`.\n\n` +
+            `**Padrões registrados:** ${Object.keys(patterns).length}`,
+        }],
+      };
+    }
+
+    const lines: string[] = [
+      `🔍 **Knowledge Base — Query:** \`${query}\``,
+      `**${hits.length} solução(ões) similar(es) encontrada(s):**\n`,
+    ];
+
+    for (let i = 0; i < hits.length; i++) {
+      const { key, solution, score } = hits[i];
+      lines.push(`### ${i + 1}. \`${key}\``);
+      lines.push(`- **Intenção:** ${solution.intent}`);
+      lines.push(`- **Domínio:** ${solution.domain}`);
+      lines.push(`- **Score de similaridade:** ${(score * 100).toFixed(0)}%`);
+      lines.push(`- **Quality score:** ${(solution.quality_score * 100).toFixed(0)}%`);
+      lines.push(`- **Reutilizado:** ${solution.reused_count}x`);
+      lines.push(`- **Agentes usados:** ${solution.agents_used.join(", ")}`);
+      lines.push(`- **Resumo:** ${solution.solution_summary}\n`);
+    }
+
+    const patternList = Object.entries(patterns)
+      .sort(([, a], [, b]) => b.occurrences - a.occurrences)
+      .slice(0, 5);
+
+    if (patternList.length > 0) {
+      lines.push("---\n**Top padrões no KB:**");
+      for (const [sig, p] of patternList) {
+        lines.push(`- \`${sig}\` — ocorrências: ${p.occurrences} | confidence: ${(p.confidence * 100).toFixed(0)}%`);
+      }
+    }
+
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  },
+);
+
+server.registerTool(
+  "get_system_metrics",
+  {
+    description:
+      "Exibe as métricas de evolução do sistema Multi-Agent. " +
+      "Mostra total de interações, quality score médio, trend das últimas 10 análises " +
+      "e performance individual de cada agente.",
+    inputSchema: {},
+  },
+  async () => {
+    const emitter = new EventEmitter();
+    const memory = new MemoryAgent(emitter);
+    const metrics = await memory.getMetrics();
+    const patterns = await memory.getPatterns();
+    const solutions = await memory.getSolutions();
+    const map = await memory.getServiceMap();
+
+    const trendBar = metrics.quality_trend
+      .map(q => q >= 0.9 ? "🟢" : q >= 0.7 ? "🟡" : "🔴")
+      .join(" ");
+
+    const lines: string[] = [
+      "## 📊 System Metrics — GPA Multi-Agent MCP",
+      "",
+      `**Total de interações:** ${metrics.total_interactions}`,
+      `**Quality score médio:** ${(metrics.avg_quality_score * 100).toFixed(1)}%`,
+      `**Trend (últimas ${metrics.quality_trend.length} interações):** ${trendBar || "sem dados ainda"}`,
+      "",
+      "### Knowledge Base",
+      `- **Padrões aprendidos:** ${Object.keys(patterns).length}`,
+      `- **Soluções persistidas:** ${Object.keys(solutions).length}`,
+      `- **Nós no mapa de serviços:** ${map.nodes.length}`,
+      `- **Dependências mapeadas:** ${map.edges.length}`,
+      `- **KB size:** ${metrics.agents_performance.memory.kb_size_kb} KB`,
+      "",
+      "### Performance por Agente",
+      `| Agente | Calls | Métrica Principal |`,
+      `|--------|-------|-------------------|`,
+      `| ANALYST   | ${metrics.agents_performance.analyst.calls} | avg_confidence: ${(metrics.agents_performance.analyst.avg_confidence * 100).toFixed(0)}% |`,
+      `| TESTER    | ${metrics.agents_performance.tester.calls} | avg_coverage: ${(metrics.agents_performance.tester.avg_coverage * 100).toFixed(0)}% |`,
+      `| ARCHITECT | ${metrics.agents_performance.architect.calls} | spof_found: ${metrics.agents_performance.architect.spof_found} |`,
+      `| DOC       | ${metrics.agents_performance.doc.calls} | docs_generated: ${metrics.agents_performance.doc.docs_generated} |`,
+      `| MEMORY    | ${metrics.agents_performance.memory.calls} | kb_size: ${metrics.agents_performance.memory.kb_size_kb} KB |`,
+    ];
+
+    if (metrics.top_patterns.length > 0) {
+      lines.push("", "### Top Padrões Identificados");
+      for (const p of metrics.top_patterns) lines.push(`- \`${p}\``);
+    }
+
+    if (map.edges.length > 0) {
+      lines.push("", "### Mapa de Serviços GPA (top 5 dependências)");
+      for (const e of map.edges.slice(0, 5)) {
+        const badges = [
+          e.has_timeout ? "✅T" : "❌T",
+          e.has_retry ? "✅R" : "❌R",
+          e.has_circuit_breaker ? "✅CB" : "❌CB",
+        ].join(" ");
+        lines.push(`- \`${e.from}\` → \`${e.to}\` [${e.type}] ${badges} (${e.occurrences}x)`);
+      }
+    }
+
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  },
 );
 
 // ─────────────────────────────────────────────
