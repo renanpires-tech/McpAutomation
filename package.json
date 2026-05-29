@@ -1,6 +1,6 @@
 {
   "name": "gpa-backend-test-analyst-mcp",
-  "version": "2.0.0",
+  "version": "4.0.0",
   "description": "MCP Server para análise de testes backend GPA E-commerce",
   "type": "module",
   "scripts": {

@@ -1,10 +1,12 @@
 import type { KnowledgeBase } from "../memory/KnowledgeBase.js";
 import type { OrchestratorAgent } from "../agents/OrchestratorAgent.js";
 import { JaCoCoParser } from "../parsers/JaCoCoParser.js";
+import { LcovParser } from "../parsers/LcovParser.js";
 import { StackTraceParser } from "../parsers/StackTraceParser.js";
 import { JUnit5Generator } from "../generators/JUnit5Generator.js";
 import { JavadocGenerator } from "../generators/JavadocGenerator.js";
 import { detectDomain } from "../domain/gpa-context.js";
+import { classifyRisk, riskEmoji } from "../domain/risk-classifier.js";
 
 export interface TaskResult {
   content: string;
@@ -13,6 +15,7 @@ export interface TaskResult {
 
 export class TaskExecutor {
   private readonly jacocoParser   = new JaCoCoParser();
+  private readonly lcovParser     = new LcovParser();
   private readonly stackParser    = new StackTraceParser();
   private readonly jUnit5Gen      = new JUnit5Generator();
   private readonly javadocGen     = new JavadocGenerator();
@@ -43,9 +46,14 @@ export class TaskExecutor {
 
   private analyzeCoverage(input: Record<string, unknown>): TaskResult {
     const xml     = String(input["jacoco_xml"] ?? "");
+    const lcov    = String(input["lcov_report"] ?? "");
     const service = String(input["service_name"] ?? "unknown-service");
 
-    if (!xml.trim()) return { content: "❌ jacoco_xml é obrigatório." };
+    const isLcov = lcov.trim() !== "" && (lcov.startsWith("SF:") || lcov.includes("\nSF:") || lcov.includes("DA:"));
+
+    if (!xml.trim() && !isLcov) return { content: "\u274C Forneça jacoco_xml ou lcov_report." };
+
+    if (isLcov) return this.analyzeLcovReport(lcov, service);
 
     const report = this.jacocoParser.parse(xml, service);
     const topGaps = report.gaps.slice(0, 5);
@@ -83,17 +91,54 @@ export class TaskExecutor {
     return { content: lines.join("\n"), metadata: { overallCoverage: report.overallCoverage, gaps: report.gaps.length } };
   }
 
+  private analyzeLcovReport(lcov: string, service: string): TaskResult {
+    const report = this.lcovParser.parse(lcov);
+    const lines: string[] = [
+      `## \uD83D\uDCCA Cobertura \u2014 ${service} (LCOV)`,
+      "",
+      `| Métrica | Valor |`,
+      `|:--------|------:|`,
+      `| Geral   | ${report.overallPct}% |`,
+      `| Linhas  | ${report.coveredLines}/${report.totalLines} |`,
+      "",
+    ];
+
+    if (report.files.length > 0) {
+      lines.push("### Por arquivo");
+      for (const f of report.files) {
+        const { risk } = classifyRisk(f.file);
+        lines.push(`- ${riskEmoji(risk)} \`${f.file}\` \u2014 Linhas: ${f.lines.pct}% | Branches: ${f.branches.pct}% | Funções: ${f.functions.pct}%`);
+      }
+      lines.push("");
+    }
+
+    const critical = report.files.filter(f => f.lines.pct < 80);
+    if (critical.length > 0) {
+      lines.push("### \uD83C\uDFAF Arquivos abaixo de 80%");
+      for (const f of critical.slice(0, 5)) {
+        const { risk } = classifyRisk(f.file);
+        lines.push(`- ${riskEmoji(risk)} \`${f.file}\` \u2014 ${f.lines.pct}% linhas | ${f.branches.pct}% branches`);
+      }
+    } else {
+      lines.push("\u2705 Todos os arquivos com cobertura \u2265 80%!");
+    }
+
+    return { content: lines.join("\n"), metadata: { overallCoverage: report.overallPct, files: report.files.length } };
+  }
+
   private generateTests(input: Record<string, unknown>): TaskResult {
     const source    = String(input["source_code"] ?? "");
     const className = String(input["class_name"] ?? "UnknownClass");
 
     if (!source.trim()) return { content: "❌ source_code é obrigatório." };
 
+    const { domain, risk } = classifyRisk(source + " " + className);
     const testCode = this.jUnit5Gen.generateFromSource(source, className);
 
     return {
       content: [
-        `## 🧪 Testes gerados — \`${className}Test.java\``,
+        `## \uD83E\uDDEA Testes gerados \u2014 \`${className}Test.java\``,
+        `> Domínio: **${domain}** | Risco: **${riskEmoji(risk)} ${risk}**`,
         "",
         "```java",
         testCode,
@@ -114,14 +159,14 @@ export class TaskExecutor {
     if (!stackTrace.trim()) return { content: "❌ stack_trace é obrigatório." };
 
     const parsed  = this.stackParser.parse(stackTrace);
-    const domain  = parsed.rootCause?.domain ?? detectDomain(stackTrace);
+    const { domain, risk } = classifyRisk(stackTrace + " " + (parsed.rootCause?.className ?? ""));
 
     const lines: string[] = [
-      `## 🔍 Diagnóstico de Falha`,
+      `## \uD83D\uDD0D Diagnóstico de Falha`,
       "",
       `**Exceção:** \`${parsed.exceptionClass}\``,
       `**Mensagem:** ${parsed.message || "(sem mensagem)"}`,
-      `**Domínio detectado:** ${domain}`,
+      `**Domínio:** ${domain} | **Risco:** ${riskEmoji(risk)} ${risk}`,
       "",
       `### 📍 Frame raiz (GPA)`,
       parsed.rootCause

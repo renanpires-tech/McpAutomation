@@ -1,7 +1,10 @@
 import type { CoverageGap } from "../parsers/JaCoCoParser.js";
 import { findPattern } from "../domain/pattern-registry.js";
+import { MockitoGenerator } from "./MockitoGenerator.js";
 
 export class JUnit5Generator {
+
+  private readonly mockitoGen = new MockitoGenerator();
 
   /** Generate a full JUnit5 test class for a coverage gap */
   generateForGap(gap: CoverageGap, classSource = ""): string {
@@ -29,7 +32,12 @@ export class JUnit5Generator {
       "@ExtendWith(MockitoExtension.class)",
       `class ${testClass} {`,
       "",
-      ...mocks.map(m => `    @Mock\n    private ${m};`),
+      ...mocks.map(m => {
+        const parts = m.split(" ");
+        const type  = parts[0] ?? "Object";
+        const field = parts[1] ?? type.charAt(0).toLowerCase() + type.slice(1);
+        return `    ${this.mockitoGen.generateMock(type, field)}`;
+      }),
       "",
       `    @InjectMocks`,
       `    private ${className} subject;`,
@@ -63,7 +71,12 @@ export class JUnit5Generator {
       "@ExtendWith(MockitoExtension.class)",
       `class ${className}Test {`,
       "",
-      ...this.inferMocks(source).map(m => `    @Mock\n    private ${m};`),
+      ...this.inferMocks(source).map(m => {
+        const parts = m.split(" ");
+        const type  = parts[0] ?? "Object";
+        const field = parts[1] ?? type.charAt(0).toLowerCase() + type.slice(1);
+        return `    ${this.mockitoGen.generateMock(type, field)}`;
+      }),
       "",
       `    @InjectMocks`,
       `    private ${className} subject;`,

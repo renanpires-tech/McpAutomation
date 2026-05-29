@@ -160,9 +160,11 @@ Comando de validação: ./mvnw test -Dtest=[classes] jacoco:report
 - Webhook handler sem teste de idempotência → ALERTA CRÍTICO
 - Chamada a gateway sem teste de timeout → ALERTA CRÍTICO`;
 
-    return {
-      content: [{ type: "text", text: prompt }],
-    };
+    const _ti: Record<string, unknown> = { service_name, target_coverage };
+    if (isJaCoCo)    _ti["jacoco_xml"]  = coverage_report;
+    else if (isLCOV) _ti["lcov_report"] = coverage_report;
+    else             _ti["jacoco_xml"]  = coverage_report;
+    return { content: [{ type: "text", text: (await taskExecutor.execute({ id: "analyze_coverage", input: _ti })).content }] };
   }
 );
 
@@ -276,9 +278,7 @@ Liste os testes NECESSÁRIOS para 100% de cobertura:
 **Alerta de teste prioritário:**
 Se o código pertencer ao domínio checkout/payment, gere imediatamente o teste mais crítico completo e compilável.`;
 
-    return {
-      content: [{ type: "text", text: prompt }],
-    };
+    return { content: [{ type: "text", text: (await orchestrator.process(`Engenharia reversa em ${language}. ${context ? `Contexto: ${context}` : ""}`, code_snippet)).content }] };
   }
 );
 
@@ -441,9 +441,10 @@ ${mock_strategy ? `\n## REFERÊNCIA DE MOCK:\n\`\`\`\n${mockGuide[mock_strategy]
 1. Código completo de todos os testes (compilável, com imports)
 2. Resumo: quantidade de testes gerados, cobertura line/branch estimada, gaps residuais`;
 
-    return {
-      content: [{ type: "text", text: prompt }],
-    };
+    const _cls = /(?:class|interface|enum)\s+(\w+)/.exec(code_snippet)?.[1] ?? "UnknownClass";
+    const _r = await taskExecutor.execute({ id: "generate_tests", input: { source_code: code_snippet, class_name: _cls } });
+    const _note = framework !== "junit5" ? `> \u26A0\uFE0F Pipeline real gera JUnit5. Framework solicitado: \`${framework}\`.\n\n` : "";
+    return { content: [{ type: "text", text: _note + _r.content }] };
   }
 );
 
@@ -571,9 +572,8 @@ void should_[resultado]_when_[condição_que_causou_falha_original]() {
 - Falha indicando dados corrompidos (estado inválido, double-charge, negative balance) → CRITICAL: verificar produção
 - Falha em teste de idempotência → CRITICAL: risco de processamento duplicado em produção`;
 
-    return {
-      content: [{ type: "text", text: prompt }],
-    };
+    const _r = await taskExecutor.execute({ id: "diagnose_failure", input: { stack_trace: error_log, test_code: test_code ?? "" } });
+    return { content: [{ type: "text", text: `## \uD83D\uDD0D Diagnóstico: \`${test_name}\`\n\n` + _r.content }] };
   }
 );
 
@@ -656,9 +656,10 @@ Após a documentação, adicione um bloco resumo:
 - Criticidade: [nível]
 - Gaps de documentação encontrados no código original: [lista ou "nenhum"]`;
 
-    return {
-      content: [{ type: "text", text: prompt }],
-    };
+    const _cls = /(?:class|interface|enum)\s+(\w+)/.exec(code_snippet)?.[1] ?? "UnknownClass";
+    const _r = await taskExecutor.execute({ id: "generate_docs", input: { source_code: code_snippet, class_name: _cls } });
+    const _note = !["javadoc", "jsdoc"].includes(doc_type) ? `> \u26A0\uFE0F Pipeline real gera Javadoc/KDoc. Tipo: \`${doc_type}\`.\n\n` : "";
+    return { content: [{ type: "text", text: _note + _r.content }] };
   }
 );
 
@@ -1283,13 +1284,9 @@ server.registerTool(
       context: z.string().optional().describe("Contexto do módulo"),
     },
   },
-  async ({ code_snippet: _code, language, context }) => {
-    return {
-      content: [{
-        type: "text",
-        text: `## 📄 Engenharia Reversa — ${language.toUpperCase()}\n\n**Contexto:** ${context ?? "não informado"}\n\n### Análise:\n- 📝 Descrição funcional gerada\n- 📥 Contrato de entrada mapeado\n- 📤 Contrato de saída mapeado\n- 🔗 Dependências identificadas\n`,
-      }],
-    };
+  async ({ code_snippet, language, context }) => {
+    const _r = await orchestrator.process(`Engenharia reversa em ${language}. ${context ? `Contexto: ${context}` : ""}`, code_snippet);
+    return { content: [{ type: "text", text: _r.content }] };
   }
 );
 
@@ -1303,13 +1300,11 @@ server.registerTool(
       mock_strategy: z.enum(["mockito", "jest-mock", "wiremock", "testcontainers"]).optional().describe("Estratégia de mock"),
     },
   },
-  async ({ code_snippet: _code, framework, mock_strategy }) => {
-    return {
-      content: [{
-        type: "text",
-        text: `## 🧪 Suite de Testes — ${framework}\n\n**Mock strategy:** ${mock_strategy ?? "padrão"}\n\n### Testes gerados:\n- ✅ Happy path\n- ✅ Edge cases\n- ✅ Boundary values\n- ✅ Error handling\n- ✅ Exception scenarios\n`,
-      }],
-    };
+  async ({ code_snippet, framework, mock_strategy: _ms }) => {
+    const _cls = /(?:class|interface|enum)\s+(\w+)/.exec(code_snippet)?.[1] ?? "UnknownClass";
+    const _r = await taskExecutor.execute({ id: "generate_tests", input: { source_code: code_snippet, class_name: _cls } });
+    const _note = framework !== "junit5" ? `> \u26A0\uFE0F Pipeline real gera JUnit5. Framework solicitado: \`${framework}\`.\n\n` : "";
+    return { content: [{ type: "text", text: _note + _r.content }] };
   }
 );
 
@@ -1331,7 +1326,6 @@ server.registerTool(
     },
   },
   async ({ input, code_snippet }) => {
-    const orchestrator = new OrchestratorAgent();
     const result = await orchestrator.run(input, code_snippet);
     const output = formatOutput(result);
     return { content: [{ type: "text", text: output }] };
@@ -1514,7 +1508,6 @@ server.experimental.tasks.registerToolTask(
       const task = await extra.taskStore.createTask({ ttl: 300_000, pollInterval: 2000 });
       runTaskWork(task.taskId, taskStore, async () => {
         await taskStore.updateTaskStatus(task.taskId, "working", "Iniciando pipeline multi-agent...");
-        const orchestrator = new OrchestratorAgent();
         await taskStore.updateTaskStatus(task.taskId, "working", "Executando agentes ANALYST, TESTER, ARCHITECT...");
         const result = await orchestrator.run(input, code_snippet);
         await taskStore.updateTaskStatus(task.taskId, "working", "Consolidando aprendizado no Knowledge Base...");
@@ -1546,7 +1539,6 @@ server.experimental.tasks.registerToolTask(
       const task = await extra.taskStore.createTask({ ttl: 180_000, pollInterval: 1500 });
       runTaskWork(task.taskId, taskStore, async () => {
         await taskStore.updateTaskStatus(task.taskId, "working", `Analisando cobertura de ${service_name}...`);
-        const orchestrator = new OrchestratorAgent();
         await taskStore.updateTaskStatus(task.taskId, "working", "Identificando gaps e riscos de negócio...");
         const result = await orchestrator.run(
           `Analisa a cobertura de testes do serviço ${service_name}. Meta: ${target_coverage}%`,
@@ -1579,7 +1571,6 @@ server.experimental.tasks.registerToolTask(
       const task = await extra.taskStore.createTask({ ttl: 180_000, pollInterval: 1500 });
       runTaskWork(task.taskId, taskStore, async () => {
         await taskStore.updateTaskStatus(task.taskId, "working", `Iniciando engenharia reversa (${language})...`);
-        const orchestrator = new OrchestratorAgent();
         await taskStore.updateTaskStatus(task.taskId, "working", "Mapeando contratos e dependências...");
         const result = await orchestrator.run(
           `Engenharia reversa em ${language}. ${context ?? ""}`,
@@ -1612,7 +1603,6 @@ server.experimental.tasks.registerToolTask(
       const task = await extra.taskStore.createTask({ ttl: 180_000, pollInterval: 1500 });
       runTaskWork(task.taskId, taskStore, async () => {
         await taskStore.updateTaskStatus(task.taskId, "working", `Gerando testes ${framework}...`);
-        const orchestrator = new OrchestratorAgent();
         await taskStore.updateTaskStatus(task.taskId, "working", "Identificando cenários e gerando casos de teste...");
         const result = await orchestrator.run(
           `Gera uma suite completa de testes usando ${framework}. Mock strategy: ${mock_strategy ?? "padrão"}.`,
@@ -1645,7 +1635,6 @@ server.experimental.tasks.registerToolTask(
       const task = await extra.taskStore.createTask({ ttl: 180_000, pollInterval: 1500 });
       runTaskWork(task.taskId, taskStore, async () => {
         await taskStore.updateTaskStatus(task.taskId, "working", "Analisando stack trace e contexto de falha...");
-        const orchestrator = new OrchestratorAgent();
         await taskStore.updateTaskStatus(task.taskId, "working", "Gerando diagnóstico e plano de correção...");
         const result = await orchestrator.run(
           `Diagnostica a falha no teste. Contexto: ${service_context ?? "não informado"}. Erro:\n${error_log}`,
@@ -1677,7 +1666,6 @@ server.experimental.tasks.registerToolTask(
       const task = await extra.taskStore.createTask({ ttl: 240_000, pollInterval: 2000 });
       runTaskWork(task.taskId, taskStore, async () => {
         await taskStore.updateTaskStatus(task.taskId, "working", "Mapeando arquitetura e dependências...");
-        const orchestrator = new OrchestratorAgent();
         await taskStore.updateTaskStatus(task.taskId, "working", "Identificando SPOFs e avaliando resiliência...");
         const result = await orchestrator.run(
           `Mapeia a arquitetura do sistema. Serviços: ${service_names ?? "não especificados"}.`,

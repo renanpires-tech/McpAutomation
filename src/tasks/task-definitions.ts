@@ -15,10 +15,11 @@ export const TASK_DEFINITIONS: TaskInput[] = [
     inputSchema: {
       type: "object",
       properties: {
-        jacoco_xml:    { type: "string", description: "Conteúdo do jacoco.xml" },
+        jacoco_xml:    { type: "string", description: "Conteúdo do jacoco.xml (opcional se lcov_report fornecido)" },
+        lcov_report:   { type: "string", description: "Conteúdo do relatório LCOV (alternativa ao jacoco_xml)" },
         service_name:  { type: "string", description: "Nome do serviço (ex: checkout-service)" },
       },
-      required: ["jacoco_xml", "service_name"],
+      required: ["service_name"],
     },
   },
   {

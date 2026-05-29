@@ -6,10 +6,11 @@ import type {
   PatternEntry, SolutionEntry, ServiceMap, Metrics,
   PatternName, Domain, Risk, KBHit,
 } from "./types.js";
+import { cosineSimilarity } from "../memory/SemanticMatcher.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Resolves to <project-root>/kb from dist/agents/MemoryAgent.js
-const KB_DIR = path.join(__dirname, "../../kb");
+const KB_DIR = path.join(__dirname, "../../knowledge");
 
 // ─────────────────────────────────────────────
 //  KB helpers
@@ -91,8 +92,7 @@ export class MemoryAgent {
 
     const scored = Object.entries(solutions).map(([key, sol]) => {
       const candidate = tokenize(`${sol.input_pattern} ${sol.solution_summary}`);
-      const hits = keywords.filter(k => candidate.includes(k)).length;
-      const score = hits / Math.max(keywords.length, 1);
+      const score = cosineSimilarity(keywords, candidate);
       return { key, solution: sol, score };
     });
 
