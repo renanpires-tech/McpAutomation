@@ -19,8 +19,8 @@ export interface ParsedStackTrace {
   summary:        string;
 }
 
-// Matches: at com.example.Foo.method(Foo.java:42)
-const FRAME_RE = /^\s+at ([\w.$]+)\.([\w$<>]+)\(([^:)]+)(?::(\d+))?\)/;
+// Matches: at com.example.Foo.method(Foo.java:42)  — lines are pre-trimmed, so no leading whitespace
+const FRAME_RE = /^at ([\w.$]+)\.([\w$<>]+)\(([^:)]+)(?::(\d+))?\)/;
 // Matches: java.lang.NullPointerException: message here
 const EX_RE    = /^([\w.]+(?:Exception|Error|Throwable)[\w.]*)(?::\s*(.*))?$/;
 // GPA base package

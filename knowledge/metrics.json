@@ -1,0 +1,31 @@
+{
+  "total_interactions": 10,
+  "avg_quality_score": 0,
+  "quality_trend": [],
+  "top_patterns": [],
+  "agents_performance": {
+    "analyst": {
+      "calls": 0,
+      "avg_confidence": 0
+    },
+    "tester": {
+      "calls": 0,
+      "avg_coverage": 0
+    },
+    "architect": {
+      "calls": 0,
+      "spof_found": 0
+    },
+    "doc": {
+      "calls": 0,
+      "docs_generated": 0
+    },
+    "memory": {
+      "calls": 0,
+      "kb_size_kb": 0
+    },
+    "tasks": {
+      "calls": 10
+    }
+  }
+}
